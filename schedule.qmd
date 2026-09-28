@@ -11,13 +11,14 @@ title: "Schedule"
 | 09:00-09:15 	| Welcome and course introduction                                                                                	| Ahmed Mahfouz (LUMC, NL)       	|
 | 09:15-10:00 	| Lecture: [Overview of SRT technologies](presentations/technology_overview.pdf)                                         	| Åsa Björklund (NBIS, SE)              |
 | 10:00-10:15 	| Break                                                                                                         	|                                	|
-| 10:15-11:00 	| Lecture: [Cell segmentation](presentations/cell_segmentation.pdf)                                                      	| Christophe Avenel (NBIS, SE)          |
-| 11:00-11:45 	| Practical 0: [SRT data formats](practicals/practical_0/Practical0_DataFormats.ipynb)   | Jonas Windhager (NBIS, SE)            |
+| 10:15-11:00 	| Lecture: [Cell segmentation](presentations/cell_segmentation.pdf) and [Data Formats](presentations/data_formats.pdf)                                                     	| Christophe Avenel, Jonas Windhager (NBIS, SE)          |
+| 11:00-11:10 	| Intro to practicals  | Aditya Singh (NBIS, SE)            |
+| 11:10-11:45 	| Practical 0: [SRT data formats](practicals/practical_0/Practical0_DataFormats.ipynb)   | Jonas Windhager (NBIS, SE)            |
 | 11:45-12:45 	| Lunch                                                                                                         	|                                	|
-| 12:45-14:15 	| Practical 1: [Cell segmentation](practicals/practical_1/Practical1_Segmentation_Cellpose.ipynb)  | Christophe Avenel (NBIS, SE) |
+| 12:45-14:15 	| Practical 1: [Cell segmentation](practicals/practical_1/Practical1_Segmentation_Cellpose.ipynb)  | Suganya Sivagurunathan (NBIS, SE) |
 | 14:15-15:00 	| Lecture: [Imaging-based spatial data analysis (preprocessing, QC and normalization)](presentations/imaging_based_analysis.pdf)   | Christophe Avenel (NBIS, SE) |
 | 15:00-15:15 	| Break                                                                                                         	|                                	|
-| 15:15-16:45 	| Practical 2: [Imaging-based analysis and QC](practicals/practical_2/p2_imaging_based_data_analysis.ipynb)  | Åsa Björklund (NBIS, SE) & Stefan Ebmeyer (NBIS, SE) |
+| 15:15-16:45 	| Practical 2: [Imaging-based analysis and QC](practicals/practical_2/p2_imaging_based_data_analysis.ipynb)  | Åsa Björklund (NBIS, SE) |
 | Evening (time TBA) | Course Dinner  |  |
 : {tbl-colwidths="[25,50,25]"}
 
@@ -46,14 +47,15 @@ title: "Schedule"
 | 13:00-14:30 	| Practical 7: Spatial statistics [Part A](practicals/practical_7/Practical7-01-point-pattern-analysis-vignette.qmd) & [Part B](practicals/practical_7/Practical7-02-lattice-data-analysis-vignette.qmd)   | Peiying Cai (UZH/SIB, CH), Jennifer Fransson (NBIS, SE) |
 | 14:30-14:45 	| Break                                                       	|                                    	|
 | 14:45-15:30 	| Lecture: [Domain identification and niche reconstruction](presentations/domains_niches.pdf)   	|          	|
-| 15:30-17:00 	| Practical 8: [Domain identification and niche reconstruction](practicals/practical_8/adata_loading_and_annotation.ipynb) 	| Benedetta Manzato (LUMC, NL), Emma Vonk (LUMC, NL) |
+| 15:30-16:15 	| Practical 8: [Domain identification and niche reconstruction](practicals/practical_8/adata_loading_and_annotation.ipynb) 	| Benedetta Manzato (LUMC, NL), Emma Vonk (LUMC, NL)        	|
+| 16:15-17:00 	| Guest lecture |  Stefania Giacomello, SciLifeLab / KTH  |
 : {tbl-colwidths="[25,50,25]"}
 
 ## Day 4 (October 9, 2026)
 
 | Time      	| Topic                                                 	| Teacher                      	|
 |-------------	|---------------------------------------------------------	|------------------------------ |
-| 09:00-09:45 	| Guest lecture 						|				|
+| 09:00-09:45 	| Practical 8 continued: [Domain identification and niche reconstruction](practicals/practical_8/adata_loading_and_annotation.ipynb) 	| Benedetta Manzato (LUMC, NL), Emma Vonk (LUMC, NL)        	|
 | 09:45-10:30 	| Lecture: [Cell-cell communication](presentations/cc_communication.pdf) | Francesca Drummer (Helmholtz, DE) |
 | 10:30-12:00 	| Practical 9: Cell-cell communication [Part A](practicals/practical_9/Practical_7_CCC_LIANA.ipynb) & [Part B](practicals/practical_9/Practical_7_CCC_TensorCell2Cell.ipynb)	| Francesca Drummer (Helmholtz, DE), Leslie Solorzano (NBIS, SE) |
 | 12:00-13:00 	| Lunch and departure                                     	|                              	|
