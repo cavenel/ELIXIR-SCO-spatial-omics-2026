@@ -55,7 +55,7 @@ title: "Schedule"
 
 | Time      	| Topic                                                 	| Teacher                      	|
 |-------------	|---------------------------------------------------------	|------------------------------ |
-| 09:00-09:45 	| Guest lecture 						|				|
+| 09:00-09:45 	| Practical 8 continued: [Domain identification and niche reconstruction](practicals/practical_8/adata_loading_and_annotation.ipynb) 	| Benedetta Manzato (LUMC, NL), Emma Vonk (LUMC, NL)        	|
 | 09:45-10:30 	| Lecture: [Cell-cell communication](presentations/cc_communication.pdf) | Francesca Drummer (Helmholtz, DE) |
 | 10:30-12:00 	| Practical 9: Cell-cell communication [Part A](practicals/practical_9/Practical_7_CCC_LIANA.ipynb) & [Part B](practicals/practical_9/Practical_7_CCC_TensorCell2Cell.ipynb)	| Francesca Drummer (Helmholtz, DE), Leslie Solorzano (NBIS, SE) |
 | 12:00-13:00 	| Lunch and departure                                     	|                              	|
