@@ -1,5 +1,5 @@
 [workspace]
-authors = ["Aditya Singh <dr.singhaditya@hotmail.com>"]
+authors = ["Aditya Singh <dr.singhaditya@hotmail.com>", "Francesca Drummer <francesca.drummer@helmholtz-munich.de>"]
 channels = ["conda-forge", "bioconda"]
 name = "env"
 platforms = ["linux-64"]
@@ -13,4 +13,42 @@ jupyter = ">=1.1.1,<2"
 curl = ">=8.20.0,<9"
 tar = ">=1.35,<2"
 gzip = ">=1.14,<2"
+python = "3.12.*"
+scanpy = ">=1.12.4,<1.13"
+# lamindb 2.10.0 caps anndata at <=0.13.2
+anndata = "0.13.2.*"
+# lamindb 2.10.0 needs s3fs<=2026.1.0, which pins fsspec to the same version
+fsspec = "<=2026.1.0"
+pandas = ">=3.0.5,<4"
+numpy = ">=2.4.6,<3"
+scipy = ">=1.18.1,<2"
+scikit-learn = ">=1.9.1,<2"
+statsmodels = ">=0.15.0,<0.16"
+numba = ">=0.67.0,<0.68"
+plotnine = ">=0.15.8,<0.16"
+matplotlib = ">=3.11.2,<4"
+seaborn = ">=0.13.2,<0.14"
+nbconvert = ">=7.17.1,<8"
+tqdm = "*"
+huggingface_hub = ">=0.34"
+# InterScale ("Multi-scale models" section) runs a pre-trained model on the CPU.
+# The torch stack comes from conda-forge so torch-cluster/-scatter/-sparse (needed by geome) are prebuilt.
+pytorch = { version = ">=2.9,<3", build = "cpu*" }
+pytorch_cluster = "*"
+pytorch_scatter = "*"
+pytorch_sparse = "*"
+pytorch-lightning = ">=2"
+pytorch_geometric = ">=2"
+lightning = ">=2"
+torchmetrics = ">=1.8"
+scvi-tools = "*"
 
+[pypi-dependencies]
+# LIANA+ 2.0 is not on PyPI yet; install from main (commit 08590dbd4 == 2.0.1.dev1).
+liana = { git = "https://github.com/scverse/liana-py", rev = "08590dbd4" }
+# lamindb 2.10.0 is the first release allowing anndata 0.13 (needed by liana main).
+lamindb = "==2.10.0"
+# squidpy 1.8.3 is not on conda-forge yet.
+squidpy = "==1.8.3"
+decoupler = "==2.2.0"
+interscale = { git = "https://github.com/theislab/interscale", rev = "c98a307e4fa3" }
