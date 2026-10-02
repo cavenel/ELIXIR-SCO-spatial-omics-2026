@@ -34,7 +34,8 @@ RUN pixi shell-hook -s bash > /shell-hook.sh && \
 
 FROM ubuntu:latest AS production
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
-ARG NB_USER=nbis
+# Serve's Jupyter Lab app mounts project volumes under /home/jovyan/<volume>
+ARG NB_USER=jovyan
 ARG NB_UID=1000
 ARG NB_GID=1000
 
@@ -45,7 +46,8 @@ ENV NB_USER=${NB_USER} \
     SHELL=/bin/bash \
     LANG=C.UTF-8 \
     LC_ALL=C.UTF-8 \
-    LANGUAGE=en_US:en
+    LANGUAGE=en_US:en \
+    LABS_DEST=/home/${NB_USER}/work
 
 # Install minimal runtime deps
 # The whole update+install is retried together, since Ubuntu mirrors can serve an index that's
@@ -79,7 +81,7 @@ RUN cat > /app/start-script.sh <<'EOF'
 #!/bin/bash
 set -e
 
-HOME=/home/nbis
+HOME=/home/jovyan
 cd "$HOME"
 source /shell-hook.sh && \
     exec jupyter lab \
@@ -109,10 +111,10 @@ RUN mkdir -p /root/.pixi/bin && chmod -R 755 /root && chown -R ${NB_UID}:${NB_GI
 
 # Switch to non-root user
 USER ${NB_UID}:${NB_GID}
-RUN /shell-hook.sh python -m ipykernel install --user --name=ELIXIR_SP --display-name "ELIXIR Spatial Omics Kernel"
+RUN /shell-hook.sh python -m ipykernel install --sys-prefix --name=ELIXIR_SP --display-name "ELIXIR Spatial Omics Kernel"
 WORKDIR /app
 
 EXPOSE 8888
 
 # tini handles signals; shell-hook activates pixi env then runs the start script
-ENTRYPOINT ["tini", "-g", "--", "./start-script.sh"]
+ENTRYPOINT ["tini", "-g", "--", "/app/start-script.sh"]

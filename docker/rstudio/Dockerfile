@@ -34,7 +34,8 @@ RUN pixi shell-hook -s bash > /shell-hook.sh && \
 
 FROM ubuntu:latest AS production
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
-ARG NB_USER=rstudio
+# Serve's RStudio app mounts project volumes under /home/jovyan/<volume>
+ARG NB_USER=jovyan
 ARG NB_UID=1000
 ARG NB_GID=1000
 
@@ -45,7 +46,8 @@ ENV NB_USER=${NB_USER} \
     SHELL=/bin/bash \
     LANG=C.UTF-8 \
     LC_ALL=C.UTF-8 \
-    LANGUAGE=en_US:en
+    LANGUAGE=en_US:en \
+    LABS_DEST=/home/${NB_USER}/work
 
 # Install minimal runtime deps
 # The whole update+install is retried together, since Ubuntu mirrors can serve an index that's
@@ -100,34 +102,36 @@ RUN echo "${NB_USER}:rstudio" | chpasswd && \
     usermod -aG sudo ${NB_USER}
 
 # Set the R working directory for the RStudio
-RUN echo 'session-default-working-dir=/work/' >> /etc/rstudio/rsession.conf && \
-    echo 'session-default-new-project-dir=/work/' >> /etc/rstudio/rsession.conf
+RUN echo "session-default-working-dir=${HOME}/work" >> /etc/rstudio/rsession.conf && \
+    echo "session-default-new-project-dir=${HOME}/work" >> /etc/rstudio/rsession.conf
 
-RUN mkdir -p /home/rstudio/.rserver/db /home/rstudio/.rserver/datadir && \
-    chown -R ${NB_UID}:${NB_GID} /home/rstudio
+RUN mkdir -p ${HOME}/.rserver/db ${HOME}/.rserver/datadir && \
+    chown -R ${NB_UID}:${NB_GID} ${HOME}
 
-RUN cat > /etc/rstudio/rserver.conf <<'EOF'
-server-user=rstudio
+RUN cat > /etc/rstudio/rserver.conf <<EOF
+server-user=${NB_USER}
 auth-none=1
-server-data-dir=/home/rstudio/.rserver/datadir
+server-data-dir=${HOME}/.rserver/datadir
 auth-timeout-minutes=0
 auth-stay-signed-in-days=30
 EOF
 
-RUN cat > /etc/rstudio/database.conf <<'EOF'
-directory=/home/rstudio/.rserver/db
+RUN cat > /etc/rstudio/database.conf <<EOF
+directory=${HOME}/.rserver/db
 auto-create=1
 EOF
 
 # Set the download method to wget
-ENV R_LIBS_USER="/${NB_USER}/Rlibs"
+ENV R_LIBS_USER="${HOME}/.Rlibs"
 # Apptainer compatibility layer
 
 # Fix permissions for the R libraries directory
 RUN chown -R ${NB_USER}:${NB_GID} /etc/rstudio && \
     mkdir -p ${R_LIBS_USER} && \
     chown -R ${NB_USER}:${NB_GID} ${R_LIBS_USER} && \
-    chown -R ${NB_USER}:${NB_GID} /var/lib/rstudio-server
+    chown -R ${NB_USER}:${NB_GID} /var/lib/rstudio-server && \
+    mkdir -p /var/run/rstudio-server && \
+    chown -R ${NB_USER}:${NB_GID} /var/run/rstudio-server
 EXPOSE 8787
 # Make /root/.pixi/bin accessible to the non-root user for pixi shell-hook to work (since pixi installs in /root by default) and it's in the PATH, this is a simple workaround
 RUN mkdir -p /root/.pixi/bin && chmod -R 755 /root && chown -R ${NB_UID}:${NB_GID} /root
@@ -137,13 +141,17 @@ RUN cat > /app/start-script.sh <<'EOF'
 #!/bin/bash
 set -e
 
-export USER=rstudio
-export HOME=/home/rstudio
-export USERNAME=rstudio
+export USER=jovyan
+export HOME=/home/jovyan
+export USERNAME=jovyan
 
 cd "$HOME"
 source /shell-hook.sh
-exec rstudio-server start
+exec /usr/lib/rstudio-server/bin/rserver \
+    --server-daemonize=0 \
+    --www-address=0.0.0.0 \
+    --www-port=8787 \
+    --rsession-which-r="$(which R)"
 EOF
 
 RUN mkdir -p ${HOME}/.cache \
@@ -165,4 +173,4 @@ WORKDIR /app
 
 
 # tini handles signals; shell-hook activates pixi env then runs the start script
-ENTRYPOINT ["tini", "-g", "--", "./start-script.sh"]
+ENTRYPOINT ["tini", "-g", "--", "/app/start-script.sh"]
