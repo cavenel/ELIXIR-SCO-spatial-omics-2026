@@ -48,7 +48,7 @@ title: "Schedule"
 | 14:30-14:45 	| Break                                                       	|                                    	|
 | 14:45-15:30 	| Lecture: [Domain identification and niche reconstruction](presentations/domains_niches.pdf)   	|          	|
 | 15:30-16:15 	| Practical 8: [Domain identification and niche reconstruction](practicals/practical_8/adata_loading_and_annotation.ipynb) 	| Benedetta Manzato (LUMC, NL), Emma Vonk (LUMC, NL)        	|
-| 16:15-17:00 	| Guest lecture |  Stefania Giacomello, SciLifeLab / KTH  |
+| 16:15-17:00 	| Guest lecture: From tissue biogeographies to spatial interactomes |  Stefania Giacomello, SciLifeLab / KTH  |
 : {tbl-colwidths="[25,50,25]"}
 
 ## Day 4 (October 9, 2026)
