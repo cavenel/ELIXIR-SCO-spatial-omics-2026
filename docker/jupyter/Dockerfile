@@ -5,13 +5,22 @@ ENV PIXI_ENV_PATH=practicals/practical_${PRAC}/env
 
 WORKDIR /app
 # Install git and curl to fetch the environment files from the repo, then clean up apt cache to reduce image size
-RUN apt-get update && apt-get install -y git curl && rm -rf /var/lib/apt/lists/*
+# The whole update+install is retried together, since Ubuntu mirrors can serve an index that's
+# briefly ahead of their package pool (update succeeds, then install 404s on a .deb)
+RUN n=0; \
+    until apt-get update && apt-get install -y git curl; do \
+        n=$((n + 1)); \
+        if [ "$n" -ge 5 ]; then exit 1; fi; \
+        echo "apt-get attempt $n failed, retrying in 10s..."; \
+        sleep 10; \
+    done && \
+    rm -rf /var/lib/apt/lists/*
 
 COPY ${PIXI_ENV_PATH}/pixi.toml /app/
 COPY ${PIXI_ENV_PATH}/pixi.lock /app/
 
 # Install the selected environment (locked for reproducibility)
-RUN pixi install --locked
+RUN pixi install --locked --run-post-link-scripts
 
 ARG NB_UID=1000
 ARG NB_GID=1000
@@ -25,7 +34,8 @@ RUN pixi shell-hook -s bash > /shell-hook.sh && \
 
 FROM ubuntu:latest AS production
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
-ARG NB_USER=nbis
+# Serve's Jupyter Lab app mounts project volumes under /home/jovyan/<volume>
+ARG NB_USER=jovyan
 ARG NB_UID=1000
 ARG NB_GID=1000
 
@@ -36,16 +46,25 @@ ENV NB_USER=${NB_USER} \
     SHELL=/bin/bash \
     LANG=C.UTF-8 \
     LC_ALL=C.UTF-8 \
-    LANGUAGE=en_US:en
+    LANGUAGE=en_US:en \
+    LABS_DEST=/home/${NB_USER}/work
 
 # Install minimal runtime deps
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# The whole update+install is retried together, since Ubuntu mirrors can serve an index that's
+# briefly ahead of their package pool (update succeeds, then install 404s on a .deb)
+RUN n=0; \
+    until apt-get update && apt-get install -y --no-install-recommends \
         bash \
         ca-certificates \
         tini \
         unzip \
-        wget \
-    && rm -rf /var/lib/apt/lists/*
+        wget; do \
+        n=$((n + 1)); \
+        if [ "$n" -ge 5 ]; then exit 1; fi; \
+        echo "apt-get attempt $n failed, retrying in 10s..."; \
+        sleep 10; \
+    done && \
+    rm -rf /var/lib/apt/lists/*
 
 # Create non-root user with UID 1000 (required for SciLifeLab Serve)
 RUN userdel -r ubuntu 2>/dev/null || true && \
@@ -62,7 +81,7 @@ RUN cat > /app/start-script.sh <<'EOF'
 #!/bin/bash
 set -e
 
-HOME=/home/nbis
+HOME=/home/jovyan
 cd "$HOME"
 source /shell-hook.sh && \
     exec jupyter lab \
@@ -81,7 +100,8 @@ RUN mkdir -p ${HOME}/.local/share/jupyter \
 RUN chmod +x /app/start-script.sh /shell-hook.sh && \
     chown -R ${NB_UID}:${NB_GID} ${HOME}
 
-# Copy helper script to download labs
+# Copy helper script to download labs (it fetches practical_data.tsv from the
+# repo at runtime, so the TSV itself is not baked into the image)
 COPY docker/download_labs.sh /home/${NB_USER}/download-labs.sh
 RUN chmod +x /home/${NB_USER}/download-labs.sh && \
     chown ${NB_UID}:${NB_GID} /home/${NB_USER}/download-labs.sh
@@ -91,10 +111,10 @@ RUN mkdir -p /root/.pixi/bin && chmod -R 755 /root && chown -R ${NB_UID}:${NB_GI
 
 # Switch to non-root user
 USER ${NB_UID}:${NB_GID}
-RUN /shell-hook.sh python -m ipykernel install --user --name=ELIXIR_SP --display-name "ELIXIR Spatial Omics Kernel"
+RUN /shell-hook.sh python -m ipykernel install --sys-prefix --name=ELIXIR_SP --display-name "ELIXIR Spatial Omics Kernel"
 WORKDIR /app
 
 EXPOSE 8888
 
 # tini handles signals; shell-hook activates pixi env then runs the start script
-ENTRYPOINT ["tini", "-g", "--", "./start-script.sh"]
+ENTRYPOINT ["tini", "-g", "--", "/app/start-script.sh"]

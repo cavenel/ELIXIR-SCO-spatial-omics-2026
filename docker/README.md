@@ -31,7 +31,7 @@ Replace `<YOUR-DOCKERHUB-ID>` with your actual Docker Hub username and `<version
 
 The final containers will be run on SciLifeLab [Serve](https://serve.scilifelab.se/). The default accounts you get on Serve only provides maximum 5 Gb Memory and 2 CPU. But we have a test project `test_elixir_spatial` with more resources that Aditya is admin of, so please contact him for access to the project once you have a Serve account. To test run them on Serve, first go to "My Projects", then open "test_elixir_spatial". There find the "Custom App" section and press the button "Create". There you have to fill in some options:
 
-* Mount path: `/home/nbis/work`
+* Mount path: `/home/jovyan/work`
 * Hardware: Make sure to have a large enough allocation.
 * Port: `8888`
 * Image: `docker.io/<YOUR-DOCKERHUB-ID>/elixir-prac-7:<version>`
@@ -45,7 +45,7 @@ Some notes about running on Serve:
 * The password for the jupyter lab is `spatial`.
 * If you add additional packages to the environment and update the Docker image, you need to create a new version. If the version remains the same, Serve will not update to the latest container version. 
 * There is a download script in the root folder (see below) that you can use to fetch the scripts and the data for the tutorials. OBS! It fetches the version found in the main branch of the repo.
-* You can move files to/from serve in the GUI, but we have noticed that files are not getting deleted properly. So if you run into problems with disk quota, please check the folder `/home/nbis/work/.Trash-1000/` and empty it if it contains large files.
+* You can move files to/from serve in the GUI, but we have noticed that files are not getting deleted properly. So if you run into problems with disk quota, please check the folder `/home/jovyan/work/.Trash-1000/` and empty it if it contains large files.
 
 # Practical Data
 
@@ -54,6 +54,12 @@ If your practical requires large datasets to be downloaded, we will be hosting t
 # Download Script
 
 `download_labs.sh` lets participants fetch practicals from GitHub into the container's `work/` directory. It can be run interactively or non-interactively via command-line arguments.
+
+## How it works
+
+- The GitHub repo archive is downloaded **once per run** (to a temp file, with a progress bar) and every requested practical is extracted from that local copy — downloading several practicals no longer re-fetches the whole repo each time.
+- When you download a practical that has a dataset registered in the manifest (see [Practical datasets](#practical-datasets)), its data is automatically downloaded and unzipped into the central `work/data/` directory.
+- Each dataset is stored under its original archive name (e.g. `work/data/Practical0`) and downloaded **only once**: practicals that share a dataset reuse it, and `reset` does not delete the central data.
 
 ## Usage
 
@@ -72,6 +78,7 @@ All options are optional and fall back to the defaults shown below.
 | `-p` | `--parent` | `practicals` | Folder inside the repo that contains the practicals |
 | `-n` | `--n-practicals` | `10` | Total number of practicals (used by the status view and reset-all) |
 | `-d` | `--dest` | `work/` | Local destination directory |
+| `-f` | `--data-file` | `practical_data.tsv` (next to the script) | TSV manifest mapping practicals to Zenodo dataset URL(s) |
 
 Options must be placed **before** the command:
 
@@ -86,8 +93,13 @@ bash download_labs.sh --dest ~/mywork --branch dev all
 | *(none)* | Open the interactive menu |
 | `all` | Download all practicals |
 | `0 3 7` | Download specific practicals by number |
+| `6` | Download both parts of practical 6 (`practical_6_part1` + `practical_6_part2`) |
+| `6_part1` | Download only `practical_6_part1` |
 | `reset 2` | Delete practical 2 |
+| `reset 6` | Delete both parts of practical 6 |
 | `reset all` | Delete all practicals |
+
+Practical 6 is split across two folders in the repo (`practical_6_part1`, `practical_6_part2`). The script treats them as one logical practical numbered `6` — asking for `6` fetches/removes both parts — but you can still target a single part with `6_part1` or `6_part2` if you only need one.
 
 ### Examples
 
@@ -103,7 +115,34 @@ bash download_labs.sh -b dev 0 3
 
 # Reset practical 5
 bash download_labs.sh reset 5
+
+# Use a custom dataset manifest
+bash download_labs.sh --data-file my_data.tsv 0
 ```
+
+## Practical datasets
+
+Large datasets are hosted on **Zenodo** rather than committed to the repo. Which practical needs which dataset is defined in `practical_data.tsv`, a **tab-separated** file next to the script with one row per practical:
+
+```
+Practical	URL
+practical_0	https://zenodo.org/records/17641420/files/Practical0.zip?download=1
+```
+
+- Column 1 is the practical directory name (`practical_0`, `practical_3`, …); column 2 is the direct download URL of a `.zip` on Zenodo.
+- The header row, blank lines, and lines starting with `#` are ignored.
+- Use a real **tab** between the two columns, not spaces.
+
+To add a dataset for a practical, upload the `.zip` to Zenodo, copy its download URL, and add a row. Its contents extract to `work/data/<ArchiveName>/`, where `<ArchiveName>` is the zip filename without `.zip` (e.g. `Practical0.zip` → `work/data/Practical0/`); reference it from your notebook via that central path.
+
+Multiple datasets for one practical can be listed as **comma-separated URLs**. To share a dataset between practicals, point them at the **same URL** so it is downloaded only once:
+
+```
+practical_0	https://zenodo.org/records/17641420/files/Practical0.zip?download=1
+practical_5	https://zenodo.org/records/17641420/files/Practical0.zip?download=1
+```
+
+See the [Contributor Wiki](https://github.com/elixir-europe-training/ELIXIR-SCO-spatial-omics-2026/wiki/Contributor-Wiki) for the full walkthrough.
 
 # GitHub Actions
 

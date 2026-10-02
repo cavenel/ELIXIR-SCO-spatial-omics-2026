@@ -5,7 +5,16 @@ ENV PIXI_ENV_PATH=practicals/practical_${PRAC}/env
 
 WORKDIR /app
 # Install git and curl to fetch the environment files from the repo, then clean up apt cache to reduce image size
-RUN apt-get update && apt-get install -y git curl && rm -rf /var/lib/apt/lists/*
+# The whole update+install is retried together, since Ubuntu mirrors can serve an index that's
+# briefly ahead of their package pool (update succeeds, then install 404s on a .deb)
+RUN n=0; \
+    until apt-get update && apt-get install -y git curl; do \
+        n=$((n + 1)); \
+        if [ "$n" -ge 5 ]; then exit 1; fi; \
+        echo "apt-get attempt $n failed, retrying in 10s..."; \
+        sleep 10; \
+    done && \
+    rm -rf /var/lib/apt/lists/*
 
 COPY ${PIXI_ENV_PATH}/pixi.toml /app/
 COPY ${PIXI_ENV_PATH}/pixi.lock /app/
@@ -25,7 +34,8 @@ RUN pixi shell-hook -s bash > /shell-hook.sh && \
 
 FROM ubuntu:latest AS production
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
-ARG NB_USER=rstudio
+# Serve's RStudio app mounts project volumes under /home/jovyan/<volume>
+ARG NB_USER=jovyan
 ARG NB_UID=1000
 ARG NB_GID=1000
 
@@ -36,10 +46,14 @@ ENV NB_USER=${NB_USER} \
     SHELL=/bin/bash \
     LANG=C.UTF-8 \
     LC_ALL=C.UTF-8 \
-    LANGUAGE=en_US:en
+    LANGUAGE=en_US:en \
+    LABS_DEST=/home/${NB_USER}/work
 
 # Install minimal runtime deps
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# The whole update+install is retried together, since Ubuntu mirrors can serve an index that's
+# briefly ahead of their package pool (update succeeds, then install 404s on a .deb)
+RUN n=0; \
+    until apt-get update && apt-get install -y --no-install-recommends \
         bash \
         ca-certificates \
         tini \
@@ -52,8 +66,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libssl-dev\
         libclang-dev \
         lsb-release \
-        sudo \
-    && rm -rf /var/lib/apt/lists/*
+        sudo; do \
+        n=$((n + 1)); \
+        if [ "$n" -ge 5 ]; then exit 1; fi; \
+        echo "apt-get attempt $n failed, retrying in 10s..."; \
+        sleep 10; \
+    done && \
+    rm -rf /var/lib/apt/lists/*
 
 # Create non-root user with UID 1000 (required for SciLifeLab Serve)
 RUN userdel -r ubuntu 2>/dev/null || true && \
@@ -83,34 +102,36 @@ RUN echo "${NB_USER}:rstudio" | chpasswd && \
     usermod -aG sudo ${NB_USER}
 
 # Set the R working directory for the RStudio
-RUN echo 'session-default-working-dir=/work/' >> /etc/rstudio/rsession.conf && \
-    echo 'session-default-new-project-dir=/work/' >> /etc/rstudio/rsession.conf
+RUN echo "session-default-working-dir=${HOME}/work" >> /etc/rstudio/rsession.conf && \
+    echo "session-default-new-project-dir=${HOME}/work" >> /etc/rstudio/rsession.conf
 
-RUN mkdir -p /home/rstudio/.rserver/db /home/rstudio/.rserver/datadir && \
-    chown -R ${NB_UID}:${NB_GID} /home/rstudio
+RUN mkdir -p ${HOME}/.rserver/db ${HOME}/.rserver/datadir && \
+    chown -R ${NB_UID}:${NB_GID} ${HOME}
 
-RUN cat > /etc/rstudio/rserver.conf <<'EOF'
-server-user=rstudio
+RUN cat > /etc/rstudio/rserver.conf <<EOF
+server-user=${NB_USER}
 auth-none=1
-server-data-dir=/home/rstudio/.rserver/datadir
+server-data-dir=${HOME}/.rserver/datadir
 auth-timeout-minutes=0
 auth-stay-signed-in-days=30
 EOF
 
-RUN cat > /etc/rstudio/database.conf <<'EOF'
-directory=/home/rstudio/.rserver/db
+RUN cat > /etc/rstudio/database.conf <<EOF
+directory=${HOME}/.rserver/db
 auto-create=1
 EOF
 
 # Set the download method to wget
-ENV R_LIBS_USER="/${NB_USER}/Rlibs"
+ENV R_LIBS_USER="${HOME}/.Rlibs"
 # Apptainer compatibility layer
 
 # Fix permissions for the R libraries directory
 RUN chown -R ${NB_USER}:${NB_GID} /etc/rstudio && \
     mkdir -p ${R_LIBS_USER} && \
     chown -R ${NB_USER}:${NB_GID} ${R_LIBS_USER} && \
-    chown -R ${NB_USER}:${NB_GID} /var/lib/rstudio-server
+    chown -R ${NB_USER}:${NB_GID} /var/lib/rstudio-server && \
+    mkdir -p /var/run/rstudio-server && \
+    chown -R ${NB_USER}:${NB_GID} /var/run/rstudio-server
 EXPOSE 8787
 # Make /root/.pixi/bin accessible to the non-root user for pixi shell-hook to work (since pixi installs in /root by default) and it's in the PATH, this is a simple workaround
 RUN mkdir -p /root/.pixi/bin && chmod -R 755 /root && chown -R ${NB_UID}:${NB_GID} /root
@@ -120,13 +141,17 @@ RUN cat > /app/start-script.sh <<'EOF'
 #!/bin/bash
 set -e
 
-export USER=rstudio
-export HOME=/home/rstudio
-export USERNAME=rstudio
+export USER=jovyan
+export HOME=/home/jovyan
+export USERNAME=jovyan
 
 cd "$HOME"
 source /shell-hook.sh
-exec rstudio-server start
+exec /usr/lib/rstudio-server/bin/rserver \
+    --server-daemonize=0 \
+    --www-address=0.0.0.0 \
+    --www-port=8787 \
+    --rsession-which-r="$(which R)"
 EOF
 
 RUN mkdir -p ${HOME}/.cache \
@@ -136,7 +161,8 @@ RUN mkdir -p ${HOME}/.cache \
 RUN chmod +x /app/start-script.sh /shell-hook.sh && \
     chown -R ${NB_UID}:${NB_GID} ${HOME}
 
-# Copy helper script to download labs
+# Copy helper script to download labs (it fetches practical_data.tsv from the
+# repo at runtime, so the TSV itself is not baked into the image)
 COPY docker/download_labs.sh /home/${NB_USER}/download-labs.sh
 RUN chmod +x /home/${NB_USER}/download-labs.sh && \
     chown ${NB_UID}:${NB_GID} /home/${NB_USER}/download-labs.sh
@@ -147,4 +173,4 @@ WORKDIR /app
 
 
 # tini handles signals; shell-hook activates pixi env then runs the start script
-ENTRYPOINT ["tini", "-g", "--", "./start-script.sh"]
+ENTRYPOINT ["tini", "-g", "--", "/app/start-script.sh"]

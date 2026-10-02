@@ -10,14 +10,24 @@
 #   -b, --branch        BRANCH      Git branch          (main)
 #   -p, --parent        DIR         Folder in repo      (practicals)
 #   -n, --n-practicals  N           Number of practicals (10)
-#   -d, --dest          PATH        Local destination   (work/)
+#   -d, --dest          PATH        Local destination   ($LABS_DEST, else work/)
+#   -f, --data-file     PATH        Dataset TSV         (fetched from the repo by default)
 #
 # Commands:
 #   (none)              Interactive menu
 #   all                 Download all practicals
 #   0 3 7               Download practical_0, _3, _7
+#   6                   Download both parts of practical_6 (6_part1 + 6_part2)
+#   6_part1             Download only practical_6_part1
 #   reset 2             Remove practical_2
 #   reset all           Remove all practicals
+#
+# Dataset TSV format (tab-separated, one row per practical):
+#   Practical<TAB>URL
+#   practical_0<TAB>https://zenodo.org/.../Practical0.zip?download=1
+#   practical_1<TAB>https://.../A.zip?download=1,https://.../B.zip?download=1
+# Multiple URLs are comma-separated. Point several practicals at the same URL to
+# download that (multi-GB) dataset only once and share it.
 ###############################################################################
 
 set -euo pipefail
@@ -27,11 +37,23 @@ REPO="elixir-europe-training/ELIXIR-SCO-spatial-omics-2026"
 BRANCH="main"
 PARENT="practicals"
 N_PRACTICALS=10
-DEST="work/"
-# Define Zenodo DOI links to download and unzip in data/ directory for certain practicals
-declare -A practical_dois=(
-    [practical_0]="https://zenodo.org/records/17641420/files/Practical0.zip?download=1"
-)
+# Container images set LABS_DEST to the mounted volume so data persists
+DEST="${LABS_DEST:-work/}"
+# Zenodo archives to download and extract into the central <DEST>/data/ directory.
+# This map is populated from a TSV file (see DATA_FILE below) so contributors can
+# add data without editing the script. Each dataset is stored under its ORIGINAL
+# archive name (e.g. data/Practical0), and reuse is keyed on that name: point
+# several practicals at the SAME URL and the (multi-GB) archive is downloaded and
+# extracted only once, then shared.
+declare -A practical_dois=()
+# TSV of "practical<TAB>url[,url2,...]" rows. Left empty by default so it is
+# fetched fresh from the repo (see fetch_data_file) instead of being baked
+# into a container image; pass -f/--data-file to use a local file instead.
+DATA_FILE=""
+# Some practicals are split into several folders on GitHub (e.g. practical_6 ->
+# practical_6_part1 + practical_6_part2). Map the numeric id to its part suffixes
+# here; a plain number with no entry here downloads a single practical_<n> folder.
+declare -A PRACTICAL_PARTS=( [6]="part1 part2" )
 
 # ---------- Colors ----------
 if [ -t 1 ]; then
@@ -47,9 +69,261 @@ warn() { echo -e "${YELLOW}⚠️  $*${RESET}"; }
 err()  { echo -e "${RED}❌ $*${RESET}"; }
 
 # ---------- Functions ----------
-download_one() {
-    local n="$1"
-    local name="practical_${n}"
+# The repo archive is large (~230 MB) because data/images are committed in git.
+# Download it ONCE per run and extract every requested practical from the cached
+# copy, instead of re-streaming the whole tarball for each practical.
+TARBALL_FILE=""
+DATA_FILE_TMP=""
+cleanup() {
+    [ -n "$TARBALL_FILE" ] && rm -f "$TARBALL_FILE"
+    [ -n "$DATA_FILE_TMP" ] && rm -f "$DATA_FILE_TMP"
+    return 0
+}
+trap cleanup EXIT
+
+fetch_tarball() {
+    [ -n "$TARBALL_FILE" ] && [ -f "$TARBALL_FILE" ] && return 0
+    TARBALL_FILE="$(mktemp "${TMPDIR:-/tmp}/elixir-sco.XXXXXX")"
+    log "Fetching repository archive..."
+    if ! curl -fL --progress-bar "$TARBALL_URL" -o "$TARBALL_FILE"; then
+        err "Failed to download archive from ${TARBALL_URL}"
+        rm -f "$TARBALL_FILE"; TARBALL_FILE=""
+        return 1
+    fi
+}
+
+# Fetch the dataset registry (practical_data.tsv) fresh from the repo, unless
+# the caller pointed DATA_FILE at a local file via -f/--data-file. This keeps
+# the registry out of the container images entirely: it always reflects
+# whatever is currently on ${BRANCH}, instead of whatever was baked in at
+# image build time.
+fetch_data_file() {
+    [ -n "$DATA_FILE" ] && return 0
+    DATA_FILE_TMP="$(mktemp "${TMPDIR:-/tmp}/practical_data.XXXXXX.tsv")"
+    local url="https://raw.githubusercontent.com/${REPO}/${BRANCH}/docker/practical_data.tsv"
+    log "Pulling the latest practical_data.tsv from ${BOLD}${REPO}@${BRANCH}${RESET}..."
+    if curl -fsSL "$url" -o "$DATA_FILE_TMP"; then
+        DATA_FILE="$DATA_FILE_TMP"
+        ok "Fetched practical_data.tsv."
+    else
+        warn "Failed to download dataset registry from ${url} — no Zenodo datasets will be downloaded."
+        rm -f "$DATA_FILE_TMP"; DATA_FILE_TMP=""
+    fi
+}
+
+# Strip surrounding whitespace and one layer of surrounding quotes.
+trim() {
+    local s="$1"
+    s="${s#"${s%%[![:space:]]*}"}"   # leading whitespace
+    s="${s%"${s##*[![:space:]]}"}"   # trailing whitespace
+    s="${s%\"}"; s="${s#\"}"          # surrounding double quotes
+    s="${s%\'}"; s="${s#\'}"          # surrounding single quotes
+    printf '%s' "$s"
+}
+
+# Populate practical_dois from a TSV: "practical<TAB>url[,url2,...]".
+# Header row, blank lines, and lines starting with '#' are ignored.
+load_dois() {
+    local file="$1"
+    if [ ! -f "$file" ]; then
+        warn "Data file not found: ${file} — no Zenodo datasets will be downloaded."
+        return 0
+    fi
+    local practical urls
+    while IFS=$'\t' read -r practical urls || [ -n "$practical" ]; do
+        practical="${practical%$'\r'}"; urls="${urls%$'\r'}"   # tolerate CRLF
+        practical="$(trim "$practical")"; urls="$(trim "$urls")"
+        [ -n "$practical" ] || continue                        # blank line
+        [ "${practical:0:1}" = "#" ] && continue               # comment
+        [ "$practical" = "Practical" ] && continue             # header row
+        [ -n "$urls" ] || { warn "No URL for ${practical} in ${file} — skipping."; continue; }
+        practical_dois["$practical"]="$urls"
+    done < "$file"
+}
+
+# Pick the directory a URL's dataset should live in under <data_dir>, starting
+# from its filename stem (e.g. data.zip -> data). Two practicals pointing at the
+# SAME url reuse that folder. Two DIFFERENT urls that happen to share a filename
+# (e.g. two Zenodo records both called "data.zip") must NOT collide, so each
+# candidate folder's provenance is checked via a ".source_url" marker written
+# inside it; on a mismatch we fall back to "<name>-2", "<name>-3", etc. A folder
+# with no marker predates this check and is assumed to match (and gets stamped),
+# so pre-existing downloads aren't invalidated.
+resolve_dataset_dir() {
+    local url="$1" data_name="$2" data_dir="$3"
+    local candidate="${data_dir}/${data_name}" i=1
+    while [ -d "$candidate" ]; do
+        if [ ! -f "$candidate/.source_url" ] || [ "$(cat "$candidate/.source_url" 2>/dev/null)" = "$url" ]; then
+            break
+        fi
+        i=$((i + 1))
+        candidate="${data_dir}/${data_name}-${i}"
+    done
+    printf '%s' "$candidate"
+}
+
+# Classify a filename by its archive type so fetch_dataset can pick the right
+# extraction tool (or none, if it isn't an archive at all).
+# Prints one of: tar, zip, gz, bz2, xz, "" (not a recognized archive).
+archive_kind() {
+    local lower
+    lower="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
+    case "$lower" in
+        *.tar.gz|*.tar.bz2|*.tar.xz|*.tgz|*.tbz2|*.txz|*.tar) printf 'tar' ;;
+        *.zip)  printf 'zip' ;;
+        *.gz)   printf 'gz' ;;
+        *.bz2)  printf 'bz2' ;;
+        *.xz)   printf 'xz' ;;
+        *)      printf '' ;;
+    esac
+}
+
+# Dataset name = the archive's own filename stem, with compound extensions like
+# .tar.gz stripped fully (Practical0.zip -> Practical0, data.tar.gz -> data).
+compute_data_name() {
+    local base="$1" lower name
+    lower="$(printf '%s' "$base" | tr '[:upper:]' '[:lower:]')"
+    case "$lower" in
+        *.tar.gz|*.tar.bz2|*.tar.xz)
+            name="${base%.*}"; name="${name%.*}" ;;
+        *)
+            name="${base%.*}" ;;
+    esac
+    printf '%s' "$name"
+}
+
+# Download + extract ONE archive into the central <DEST>/data dir, keyed on the
+# archive's own filename stem (e.g. data/Practical0) unless that collides with a
+# different URL (see resolve_dataset_dir). A dataset shared by several practicals
+# (same URL) is fetched only once. If the URL doesn't point at a recognized
+# archive, the downloaded file is kept as-is (no extraction attempted).
+fetch_dataset() {
+    local for_name="$1" url="$2"
+
+    local base="${url##*/}"; base="${base%%\?*}"   # strip path + query string
+    local data_name; data_name="$(compute_data_name "$base")"
+    local kind; kind="$(archive_kind "$base")"
+    local data_dir="${DEST}/data"
+    mkdir -p "$data_dir"
+    local dest
+    dest="$(resolve_dataset_dir "$url" "$data_name" "$data_dir")"
+
+    if [ -d "$dest" ]; then
+        [ -f "$dest/.source_url" ] || printf '%s' "$url" > "$dest/.source_url"
+        ok "Dataset '$(basename "$dest")' already present in ${data_dir}/ — reusing it (no download for ${for_name})."
+        return 0
+    fi
+
+    local archive_file stage
+    archive_file="$(mktemp "${TMPDIR:-/tmp}/${data_name}.XXXXXX")"
+    stage="$(mktemp -d "${data_dir}/.stage.XXXXXX")"   # same FS as dest -> atomic move
+    log "Downloading dataset ${BOLD}${data_name}${RESET} for ${for_name} from Zenodo: ${url}"
+    if ! curl -fL --progress-bar "$url" -o "$archive_file"; then
+        err "Failed to download dataset '${data_name}'."
+        rm -f "$archive_file"; rm -rf "$stage"; return 1
+    fi
+
+    case "$kind" in
+        zip)
+            if ! unzip -oq "$archive_file" -d "$stage"; then
+                err "Failed to unzip dataset '${data_name}'."
+                rm -f "$archive_file"; rm -rf "$stage"; return 1
+            fi
+            ;;
+        tar)
+            # tar auto-detects gzip/bzip2/xz compression, so this covers
+            # .tar, .tar.gz/.tgz, .tar.bz2/.tbz2 and .tar.xz/.txz alike.
+            if ! tar -xf "$archive_file" -C "$stage"; then
+                err "Failed to extract tar archive '${data_name}'."
+                rm -f "$archive_file"; rm -rf "$stage"; return 1
+            fi
+            ;;
+        gz)
+            if ! gzip -dc "$archive_file" > "${stage}/${data_name}"; then
+                err "Failed to decompress dataset '${data_name}'."
+                rm -f "$archive_file"; rm -rf "$stage"; return 1
+            fi
+            ;;
+        bz2)
+            if ! bzip2 -dc "$archive_file" > "${stage}/${data_name}"; then
+                err "Failed to decompress dataset '${data_name}'."
+                rm -f "$archive_file"; rm -rf "$stage"; return 1
+            fi
+            ;;
+        xz)
+            if ! xz -dc "$archive_file" > "${stage}/${data_name}"; then
+                err "Failed to decompress dataset '${data_name}'."
+                rm -f "$archive_file"; rm -rf "$stage"; return 1
+            fi
+            ;;
+        '')
+            # Not a recognized archive — keep the downloaded file as-is.
+            mv "$archive_file" "${stage}/${base}"
+            archive_file=""
+            ;;
+    esac
+    [ -n "$archive_file" ] && rm -f "$archive_file"
+    # Clean up any __MACOSX folders that may be included in a zip
+    find "$stage" -name "__MACOSX" -type d -exec rm -rf {} + 2>/dev/null || true
+
+    # Publish under the original name. Only stage -> dest at the end, so an
+    # interrupted download never leaves a half-populated dataset folder behind.
+    local tops only
+    tops=$(find "$stage" -mindepth 1 -maxdepth 1 | wc -l | tr -d ' ')
+    only=$(find "$stage" -mindepth 1 -maxdepth 1)
+    if [ "$tops" -eq 1 ] && [ -d "$only" ]; then
+        mv "$only" "$dest"          # zip already had a single top-level folder
+        rm -rf "$stage"
+    else
+        mv "$stage" "$dest"         # loose files: keep them under data_name/
+    fi
+    printf '%s' "$url" > "$dest/.source_url"
+    ok "Dataset '$(basename "$dest")' extracted to ${dest}/"
+}
+
+download_data() {
+    # Fetch every dataset registered for a practical. The registry value may hold
+    # several comma-separated URLs; each is downloaded/deduped independently.
+    local name="$1"
+    [[ -n "${practical_dois[$name]:-}" ]] || return 0
+
+    local urls url rc=0
+    IFS=',' read -ra urls <<< "${practical_dois[$name]}"
+    for url in "${urls[@]}"; do
+        url="$(trim "$url")"
+        [ -n "$url" ] || continue
+        fetch_dataset "$name" "$url" || rc=1
+    done
+    return "$rc"
+}
+
+# Expand a user-supplied id (e.g. "6") into the one or more actual practical
+# folder names it refers to (e.g. "practical_6_part1", "practical_6_part2").
+# An id that already names a part (e.g. "6_part1") or an unsplit practical
+# passes straight through as "practical_<id>".
+expand_practical_arg() {
+    local arg="$1"
+    if [[ "$arg" =~ ^[0-9]+$ ]] && [[ -n "${PRACTICAL_PARTS[$arg]:-}" ]]; then
+        local part
+        for part in ${PRACTICAL_PARTS[$arg]}; do
+            printf 'practical_%s_%s\n' "$arg" "$part"
+        done
+    else
+        printf 'practical_%s\n' "$arg"
+    fi
+}
+
+# Full ordered list of practical folder names, split practicals expanded into
+# their parts. Used by the status view and reset-all.
+all_practical_names() {
+    local i
+    for i in $(seq 0 $((N_PRACTICALS - 1))); do
+        expand_practical_arg "$i"
+    done
+}
+
+download_one_name() {
+    local name="$1"
     local target="${DEST}/${name}"
 
     if [ -d "$target" ]; then
@@ -57,79 +331,92 @@ download_one() {
         rm -rf "$target"
     fi
 
-    mkdir -p "$DEST"
-    log "Downloading ${BOLD}${name}${RESET}..."
+    log "Extracting ${BOLD}${name}${RESET}..."
 
-    if curl -sL "$TARBALL_URL" \
-        | tar -xz -C "$DEST" --strip-components=2 \
-            "${REPO_NAME}-${BRANCH}/${PARENT}/${name}" 2>/dev/null; then
+    if tar -xz -f "$TARBALL_FILE" -C "$DEST" --strip-components=2 \
+            "${REPO_NAME}-${BRANCH}/${PARENT}/${name}"; then
         local n_files n_nb
         n_files=$(find "$target" -type f | wc -l | tr -d ' ')
         n_nb=$(find "$target" -name "*.ipynb" | wc -l | tr -d ' ')
         ok "${name} → ${target} (${n_files} files, ${n_nb} notebooks)"
-        if [[ -n "${practical_dois[$name]:-}" ]]; then
-            log "Downloading data for ${name} from Zenodo DOI: ${practical_dois[$name]}"
-            curl --cookie zenodo-cookies.txt -L "${practical_dois[$name]}" -o "work/${name}.zip"
-            unzip -o "work/${name}.zip" -d "$target/data/"
-            rm "work/${name}.zip"
-            # Clean up any __MACOSX folders that may be included in the zip
-            find "$target/data/" -name "__MACOSX" -type d -exec rm -rf {} + >/dev/null 2>&1 || true
-            ok "Data for ${name} downloaded and extracted to ${target}/data/"
-        fi
+        download_data "$name"
     else
-        err "Failed to download ${name}. Does it exist in the repo?"
+        err "Failed to extract ${name}. Does it exist in the repo?"
         return 1
     fi
+}
+
+download_one() {
+    local arg="$1"
+
+    fetch_tarball || return 1
+    mkdir -p "$DEST"
+
+    local name rc=0
+    while IFS= read -r name; do
+        download_one_name "$name" || rc=1
+    done < <(expand_practical_arg "$arg")
+    return "$rc"
 }
 
 download_all() {
+    fetch_tarball || return 1
     mkdir -p "$DEST"
-    log "Downloading ${BOLD}ALL${RESET} practicals..."
-    if curl -sL "$TARBALL_URL" \
-        | tar -xz -C "$DEST" --strip-components=2 \
+    log "Extracting ${BOLD}ALL${RESET} practicals..."
+    if tar -xz -f "$TARBALL_FILE" -C "$DEST" --strip-components=2 \
             "${REPO_NAME}-${BRANCH}/${PARENT}"; then
         ok "All practicals downloaded → ${DEST}"
-
     else
-        err "Download failed."
+        err "Extraction failed."
         return 1
     fi
+
+    local name rc=0
+    while IFS= read -r name; do
+        download_data "$name" || rc=1
+    done < <(all_practical_names)
+    return "$rc"
 }
 
 reset_one() {
-    local n="$1"
-    local target="${DEST}/practical_${n}"
-    if [ -d "$target" ]; then
-        rm -rf "$target"
-        ok "Removed practical_${n}"
-    else
-        warn "practical_${n} not present."
-    fi
+    local arg="$1"
+    local name
+    while IFS= read -r name; do
+        local target="${DEST}/${name}"
+        if [ -d "$target" ]; then
+            rm -rf "$target"
+            ok "Removed ${name}"
+        else
+            warn "${name} not present."
+        fi
+    done < <(expand_practical_arg "$arg")
 }
 
 reset_all() {
     local removed=0
-    for i in $(seq 0 $((N_PRACTICALS - 1))); do
-        local target="${DEST}/practical_${i}"
+    local name
+    while IFS= read -r name; do
+        local target="${DEST}/${name}"
         if [ -d "$target" ]; then
             rm -rf "$target"
             removed=$((removed + 1))
         fi
-    done
+    done < <(all_practical_names)
     ok "Removed ${removed} practicals."
 }
 
 show_status() {
     echo
     echo -e "${BOLD}Current status in ${DEST}:${RESET}"
-    for i in $(seq 0 $((N_PRACTICALS - 1))); do
-        local target="${DEST}/practical_${i}"
+    local name
+    while IFS= read -r name; do
+        local target="${DEST}/${name}"
         if [ -d "$target" ]; then
-            echo -e "  ${GREEN}✅ practical_${i}${RESET}"
+            echo -e "  ${GREEN}✅ ${name}${RESET}"
         else
-            echo -e "  ${YELLOW}⬜ practical_${i}${RESET}  (not downloaded)"
+            echo -e "  ${YELLOW}⬜ ${name}${RESET}  (not downloaded)"
         fi
-    done
+    done < <(all_practical_names)
     echo
 }
 
@@ -137,7 +424,7 @@ interactive_menu() {
     while true; do
         show_status
         echo -e "${BOLD}Options:${RESET}"
-        echo "  [0-9]   Download a specific practical (e.g. type '3')"
+        echo "  [0-9]   Download a specific practical (e.g. type '3', or '6' for both parts of practical 6)"
         echo "  a       Download ALL practicals"
         echo "  r N     Reset (delete) practical N (e.g. 'r 2')"
         echo "  R       Reset ALL practicals"
@@ -146,12 +433,18 @@ interactive_menu() {
         read -rp "Choice: " choice
 
         case "$choice" in
-            [0-9])         download_one "$choice" ;;
             a|A)           download_all ;;
-            r\ [0-9])      reset_one "${choice#r }" ;;
+            r\ *)          reset_one "${choice#r }" ;;
             R)             reset_all ;;
             q|Q|exit|quit) ok "Bye!"; exit 0 ;;
-            *)             warn "Unknown choice: $choice" ;;
+            '')            : ;;
+            *)
+                if [[ "$choice" =~ ^[0-9]+(_part[0-9]+)?$ ]]; then
+                    download_one "$choice"
+                else
+                    warn "Unknown choice: $choice"
+                fi
+                ;;
         esac
     done
 }
@@ -164,14 +457,21 @@ while [[ $# -gt 0 ]]; do
         -p|--parent)         PARENT="$2";        shift 2 ;;
         -n|--n-practicals)   N_PRACTICALS="$2";  shift 2 ;;
         -d|--dest)           DEST="$2";          shift 2 ;;
+        -f|--data-file)      DATA_FILE="$2";     shift 2 ;;
         --) shift; break ;;
         -*) err "Unknown option: $1"; exit 1 ;;
         *) break ;;
     esac
 done
 
+DEST="${DEST%/}"   # strip trailing slash to avoid work//practical_0
 REPO_NAME="${REPO##*/}"
 TARBALL_URL="https://github.com/${REPO}/archive/refs/heads/${BRANCH}.tar.gz"
+
+# Populate the dataset registry from the TSV file, fetching it first if no
+# local file was given via -f/--data-file.
+fetch_data_file
+[ -n "$DATA_FILE" ] && load_dois "$DATA_FILE"
 
 # ---------- Main ----------
 echo -e "${BOLD}🧬 ELIXIR Spatial Omics 2026 — Practicals downloader${RESET}"
@@ -204,9 +504,10 @@ if [ "$1" = "all" ]; then
     exit 0
 fi
 
-# Handle list of numbers
+# Handle list of numbers (optionally "<n>_part<k>" for a single part of a
+# split practical, e.g. "6_part1")
 for n in "$@"; do
-    if [[ "$n" =~ ^[0-9]+$ ]]; then
+    if [[ "$n" =~ ^[0-9]+(_part[0-9]+)?$ ]]; then
         download_one "$n"
     else
         warn "Skipping invalid argument: $n"
