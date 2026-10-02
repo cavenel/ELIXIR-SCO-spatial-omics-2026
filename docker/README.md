@@ -31,7 +31,7 @@ Replace `<YOUR-DOCKERHUB-ID>` with your actual Docker Hub username and `<version
 
 The final containers will be run on SciLifeLab [Serve](https://serve.scilifelab.se/). The default accounts you get on Serve only provides maximum 5 Gb Memory and 2 CPU. But we have a test project `test_elixir_spatial` with more resources that Aditya is admin of, so please contact him for access to the project once you have a Serve account. To test run them on Serve, first go to "My Projects", then open "test_elixir_spatial". There find the "Custom App" section and press the button "Create". There you have to fill in some options:
 
-* Mount path: `/home/nbis/work`
+* Mount path: `/home/jovyan/work`
 * Hardware: Make sure to have a large enough allocation.
 * Port: `8888`
 * Image: `docker.io/<YOUR-DOCKERHUB-ID>/elixir-prac-7:<version>`
@@ -45,7 +45,7 @@ Some notes about running on Serve:
 * The password for the jupyter lab is `spatial`.
 * If you add additional packages to the environment and update the Docker image, you need to create a new version. If the version remains the same, Serve will not update to the latest container version. 
 * There is a download script in the root folder (see below) that you can use to fetch the scripts and the data for the tutorials. OBS! It fetches the version found in the main branch of the repo.
-* You can move files to/from serve in the GUI, but we have noticed that files are not getting deleted properly. So if you run into problems with disk quota, please check the folder `/home/nbis/work/.Trash-1000/` and empty it if it contains large files.
+* You can move files to/from serve in the GUI, but we have noticed that files are not getting deleted properly. So if you run into problems with disk quota, please check the folder `/home/jovyan/work/.Trash-1000/` and empty it if it contains large files.
 
 # Practical Data
 

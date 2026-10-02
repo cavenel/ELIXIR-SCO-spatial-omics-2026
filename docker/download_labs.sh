@@ -10,7 +10,7 @@
 #   -b, --branch        BRANCH      Git branch          (main)
 #   -p, --parent        DIR         Folder in repo      (practicals)
 #   -n, --n-practicals  N           Number of practicals (10)
-#   -d, --dest          PATH        Local destination   (work/)
+#   -d, --dest          PATH        Local destination   ($LABS_DEST, else work/)
 #   -f, --data-file     PATH        Dataset TSV         (fetched from the repo by default)
 #
 # Commands:
@@ -37,7 +37,8 @@ REPO="elixir-europe-training/ELIXIR-SCO-spatial-omics-2026"
 BRANCH="main"
 PARENT="practicals"
 N_PRACTICALS=10
-DEST="work/"
+# Container images set LABS_DEST to the mounted volume so data persists
+DEST="${LABS_DEST:-work/}"
 # Zenodo archives to download and extract into the central <DEST>/data/ directory.
 # This map is populated from a TSV file (see DATA_FILE below) so contributors can
 # add data without editing the script. Each dataset is stored under its ORIGINAL

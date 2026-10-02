@@ -34,8 +34,8 @@ Often, the starting point in spatial omics data analysis in `R` is a `r BiocStyl
 ```{r warning=FALSE, message=FALSE}
 #| label: load packages
 
-if(!file.exists("/home/rstudio/.cache/R/ExperimentHub")){
-  dir.create("/home/rstudio/.cache/R/ExperimentHub", recursive = TRUE)
+if(!file.exists("/home/jovyan/.cache/R/ExperimentHub")){
+  dir.create("/home/jovyan/.cache/R/ExperimentHub", recursive = TRUE)
 }
 
 suppressPackageStartupMessages({
@@ -59,7 +59,7 @@ suppressPackageStartupMessages({
 # load the data from ExperimentHub
 #basedir <- here::here("day_3/practical_5/")
 
-basedir <- "/home/rstudio/work/practical_7/"
+basedir <- "/home/jovyan/work/practical_7/"
 
 if(!file.exists(file.path(basedir, "data","brain.rds"))){
   
