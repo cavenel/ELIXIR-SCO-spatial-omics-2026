@@ -30,7 +30,7 @@ SciLifeLab Serve is an app-hosting platform provided by SciLifeLab Sweden. All p
 
 ![](./assets/serve/serve_lab_app_types.png)
 
-4. You will now see a form to configure a notebook server. Under _Name_ put the name of your choice, _e.g._ the practical name. Under _Environment_, select the practical you want to run (_e.g._ _Spatial Omics Practical 3 (Jupyter)_). Leave the rest of the fields unchanged. Now click _Submit_.
+4. You will now see a form to configure a notebook server. Under _Environment_, select the practical you want to run (_e.g._ _Spatial Omics Practical 3 (Jupyter)_). Under _Title_ put the name of your choice, _e.g._ the practical name. Leave the rest of the fields unchanged. Now click _Publish_.
 
 ![](./assets/serve/serve_lab_form.png)
 
